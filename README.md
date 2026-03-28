@@ -27,7 +27,7 @@ The system combines **RAG, Graph-based reasoning, BERT classification, and LLM-b
 
   * Enhances AI accuracy using knowledge base
 
-* 🤖 **LLM Integration (Ollama / OpenRouter)**
+* 🤖 **LLM Integration (Ollama)**
 
   * Generates structured diagnosis & treatment
 
@@ -79,7 +79,7 @@ Frontend Display (Cards per Patient)
 
 ### 🧠 AI Components
 
-* LLM (Ollama - LLaMA3 / OpenRouter)
+* LLM (Ollama - LLaMA3)
 * BioBERT (Simulated)
 * RAG (Custom knowledge base)
 * GraphRAG (Custom graph logic)
