@@ -14,7 +14,7 @@ def build_graph(summary):
         symptoms.append("Cough")
         diseases.append("Flu")
 
-    # ✅ FIX: chest pain alone ≠ heart disease
+    
     if "chest pain" in text:
         symptoms.append("Chest Pain")
 

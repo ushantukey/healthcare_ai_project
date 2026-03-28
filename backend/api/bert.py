@@ -3,7 +3,7 @@
 def classify_disease(summary):
     text = summary.lower()
 
-    # ✅ priority matters
+    
     if "chest pain" in text and ("shortness of breath" in text or "severe" in text):
         return "Cardiovascular Disease"
 
