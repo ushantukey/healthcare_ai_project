@@ -1,16 +1,19 @@
-def classify_disease(summary):
-    summary = summary.lower()
+# api/bert.py
 
-    if "fever" in summary and "cough" in summary:
+def classify_disease(summary):
+    text = summary.lower()
+
+    # ✅ priority matters
+    if "chest pain" in text and ("shortness of breath" in text or "severe" in text):
+        return "Cardiovascular Disease"
+
+    if "fever" in text and "cough" in text:
         return "Respiratory Infection"
 
-    if "chest pain" in summary:
-        return "Cardiovascular Issue"
+    if "headache" in text:
+        return "Neurological Disorder"
 
-    if "headache" in summary:
-        return "Neurological Condition"
+    if "diabetes" in text:
+        return "Metabolic Disorder"
 
-    if "fatigue" in summary:
-        return "Chronic Condition / Anemia"
-
-    return "General Illness"
+    return "General Condition"

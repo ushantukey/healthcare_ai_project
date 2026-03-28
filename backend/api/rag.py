@@ -1,28 +1,39 @@
-def get_medical_context(summary):
-    knowledge_base = [
-        {
-            "keywords": ["fever", "cough"],
-            "context": "Possible respiratory infection like flu or COVID-19."
-        },
-        {
-            "keywords": ["chest pain", "breath"],
-            "context": "May indicate heart disease or lung condition."
-        },
-        {
-            "keywords": ["headache", "vomiting"],
-            "context": "Possible migraine or neurological issue."
-        },
-        {
-            "keywords": ["fatigue", "weakness"],
-            "context": "May be due to anemia or chronic illness."
-        }
-    ]
+from sentence_transformers import SentenceTransformer, util
 
-    matched_contexts = []
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+knowledge_base = [
+    {
+        "keywords": ["fever", "cough"],
+        "text": "Possible viral infection or flu. Recommend rest, hydration, and paracetamol."
+    },
+    {
+        "keywords": ["chest pain", "severe", "shortness of breath"],
+        "text": "Possible cardiac issue. ECG and immediate consultation required."
+    },
+    {
+        "keywords": ["diabetes"],
+        "text": "Monitor blood sugar, take insulin or metformin, maintain diet."
+    },
+    {
+        "keywords": ["headache"],
+        "text": "Possible migraine or stress. Suggest rest and hydration."
+    }
+]
+
+
+def get_medical_context(summary):
+    text = summary.lower()
+
+    contexts = []
 
     for item in knowledge_base:
         for keyword in item["keywords"]:
-            if keyword.lower() in summary.lower():
-                matched_contexts.append(item["context"])
+            if keyword in text:
+                contexts.append(item["text"])
+                break
 
-    return " ".join(matched_contexts)
+    if not contexts:
+        return "General medical advice required."
+
+    return "\n".join(list(set(contexts)))

@@ -1,93 +1,255 @@
-# api/views.py
-
-import requests
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.conf import settings
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
+import requests
+import json
+
+from .models import PatientAnalysis
 from .rag import get_medical_context
 from .graph_rag import build_graph
 from .bert import classify_disease
 
 
+# ------------------ TEST API ------------------
 def test_api(request):
     return JsonResponse({"message": "API is working!"})
 
 
-@api_view(['POST'])
-def analyze_patient(request):
-    summary = request.data.get('summary')
+# ------------------ ENHANCED LLM ------------------
+def generate_llm_response(summary, context, graph_data, disease_prediction):
 
-    if not summary:
-        return Response({"error": "No summary provided"}, status=400)
+    prompt = f"""
+    You are an advanced medical AI.
+
+    STRICTLY return ONLY valid JSON:
+
+    {{
+        "diagnosis": "",
+        "reasoning": "",
+        "confidence": "",
+        "risk_level": "",
+        "symptoms": [],
+        "treatment": [],
+        "doctor_advice": [],
+        "tests": [],
+        "emergency": []
+    }}
+
+    Patient Summary: {summary}
+    Context: {context}
+    Graph Data: {graph_data}
+    Prediction: {disease_prediction}
+    """
 
     try:
-        # ✅ RAG
-        context = get_medical_context(summary)
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "llama3",
+                "prompt": prompt,
+                "stream": False
+            },
+            timeout=10
+        )
 
-        # ✅ GraphRAG
-        graph_data = build_graph(summary)
+        data = response.json()
+        text = data.get("response", "").strip()
 
-        # ✅ BERT (SMART SIMULATION)
-        disease_prediction = classify_disease(summary)
+        try:
+            parsed = json.loads(text)
 
-        url = "https://openrouter.ai/api/v1/chat/completions"
+            return {
+                "diagnosis": parsed.get("diagnosis", disease_prediction),
+                "reasoning": parsed.get("reasoning", ""),
+                "confidence": parsed.get("confidence", "80%"),
+                "risk_level": parsed.get("risk_level", "Medium"),
+                "symptoms": parsed.get("symptoms", []),
+                "treatment": parsed.get("treatment", []),
+                "doctor_advice": parsed.get("doctor_advice", []),
+                "tests": parsed.get("tests", []),
+                "emergency": parsed.get("emergency", [])
+            }
+        except:
+            return None
 
-        headers = {
-            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-        }
+    except:
+        return None
 
-        # ✅ FINAL PROMPT (ALL COMPONENTS)
-        prompt = f"""
-        You are a medical AI assistant.
 
-        BERT Prediction:
-        Likely Disease Category: {disease_prediction}
+# ------------------ RULE-BASED FALLBACK ------------------
+def generate_rule_based_response(summary, context, graph_data, disease_prediction):
 
-        Graph Analysis:
-        Symptoms: {graph_data.get('symptoms')}
-        Possible Diseases: {graph_data.get('possible_diseases')}
+    text = summary.lower()
+    symptoms = graph_data.get("symptoms", [])
 
-        Medical Context:
-        {context}
+    tests = set()
+    treatment = set()
+    advice = set()
+    emergency = set()
 
-        Analyze the patient summary and provide:
+    if any(x in text for x in ["chest pain", "heart", "cardiac"]):
+        tests.update(["ECG", "Troponin test", "Chest X-ray"])
+        treatment.update(["Aspirin (if prescribed)", "Oxygen support", "Immediate hospitalization"])
+        advice.update(["Consult cardiologist immediately", "Avoid physical activity"])
+        emergency.add("Heart attack risk – go to hospital immediately")
 
-        1. Final Diagnosis
-        2. Treatment Plan (clear steps)
+    if any(x in text for x in ["diabetes", "sugar"]):
+        tests.update(["Blood glucose test", "HbA1c"])
+        treatment.update(["Insulin / Metformin", "Low sugar diet", "Regular monitoring"])
+        advice.update(["Maintain diet", "Check sugar daily", "Visit endocrinologist"])
 
-        Patient Summary:
-        {summary}
-        """
+    if "headache" in text:
+        tests.update(["Neurological exam", "CT scan (if severe)"])
+        treatment.update(["Pain relievers", "Rest"])
+        advice.update(["Sleep properly", "Consult doctor if persistent"])
 
-        data = {
-            "model": "openai/gpt-3.5-turbo",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
-        }
+    if any(x in text for x in ["cough", "fever"]):
+        tests.update(["CBC", "Chest X-ray"])
+        treatment.update(["Paracetamol", "Hydration"])
+        advice.update(["Take rest", "Monitor temperature"])
 
-        response = requests.post(url, headers=headers, json=data)
+    if any(x in text for x in ["breathing", "shortness"]):
+        emergency.add("Severe breathing issue – urgent care needed")
 
-        if response.status_code != 200:
-            return Response({
-                "error": "API Error",
-                "details": response.text
-            }, status=500)
+    if any(x in text for x in ["stroke", "weakness"]):
+        emergency.add("Possible stroke – emergency treatment required")
 
-        result = response.json()
+    if not tests:
+        tests.add("Basic blood test")
 
-        ai_output = result.get('choices', [{}])[0].get('message', {}).get('content', 'No AI response')
+    if not treatment:
+        treatment.update(["Rest", "Hydration"])
 
-        return Response({
-            "summary": summary,
-            "bert_prediction": disease_prediction,
-            "graph_data": graph_data,
-            "rag_context": context,
-            "ai_response": ai_output
+    if not advice:
+        advice.add("Consult doctor if symptoms worsen")
+
+    if not emergency:
+        emergency.add("Seek help if symptoms become severe")
+
+    if any(x in text for x in ["chest pain", "stroke", "breathing"]):
+        risk = "High"
+    elif any(x in text for x in ["fever", "cough", "diabetes"]):
+        risk = "Medium"
+    else:
+        risk = "Low"
+
+    return {
+        "diagnosis": disease_prediction,
+        "reasoning": f"Based on symptoms: {', '.join(symptoms)}",
+        "confidence": "75%",
+        "risk_level": risk,
+        "symptoms": symptoms,
+        "treatment": list(treatment),
+        "doctor_advice": list(advice),
+        "tests": list(tests),
+        "emergency": list(emergency)
+    }
+
+
+# ------------------ MAIN API ------------------
+@csrf_exempt
+@api_view(['POST'])
+def analyze_patient(request):
+
+    summaries = request.data.get('summaries')
+
+    if not summaries:
+        single = request.data.get('summary')
+        if single:
+            summaries = [single]
+        else:
+            return Response({"error": "Provide summary"}, status=400)
+
+    results = []
+
+    for summary in summaries:
+        try:
+            context = get_medical_context(summary)
+            graph_data = build_graph(summary)
+            disease_prediction = classify_disease(summary)
+
+            llm_response = generate_llm_response(
+                summary, context, graph_data, disease_prediction
+            )
+
+            ai_output = llm_response if llm_response else generate_rule_based_response(
+                summary, context, graph_data, disease_prediction
+            )
+
+            saved = PatientAnalysis.objects.create(
+                summary=summary,
+                diagnosis=ai_output.get("diagnosis"),
+                reasoning=ai_output.get("reasoning"),
+                confidence=ai_output.get("confidence"),
+                risk_level=ai_output.get("risk_level")
+            )
+
+            # ✅ FIXED PART
+            care_plan = list(set(
+                ai_output.get("treatment", []) +
+                ai_output.get("doctor_advice", [])
+            ))
+
+            tests = ai_output.get("tests", []) if ai_output.get("risk_level") == "High" else []
+
+            results.append({
+                "id": saved.id,
+                "summary": summary,
+                "diagnosis": ai_output.get("diagnosis"),
+                "confidence": ai_output.get("confidence"),
+                "risk": ai_output.get("risk_level"),
+                "symptoms": ai_output.get("symptoms"),
+                "care_plan": care_plan,
+                "tests": tests,
+                "emergency": ai_output.get("emergency")
+            })
+
+        except Exception as e:
+            results.append({
+                "summary": summary,
+                "error": str(e)
+            })
+
+    return Response({
+        "total": len(results),
+        "results": results
+    })
+
+
+# ------------------ HISTORY ------------------
+@api_view(['GET'])
+def get_history(request):
+    data = PatientAnalysis.objects.all().order_by('-created_at')[:10]
+
+    result = []
+    for item in data:
+        result.append({
+            "id": item.id,
+            "summary": item.summary,
+            "diagnosis": item.diagnosis,
+            "confidence": item.confidence,
+            "risk": item.risk_level,
+            "date": item.created_at
         })
 
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
+    return Response(result)
+
+
+@csrf_exempt
+@api_view(['DELETE'])
+def delete_history(request, id):
+    try:
+        record = PatientAnalysis.objects.get(id=id)
+        record.delete()
+        return Response({"message": "Deleted successfully"})
+    except PatientAnalysis.DoesNotExist:
+        return Response({"error": "Record not found"}, status=404)
+
+
+@csrf_exempt
+@api_view(['DELETE'])
+def delete_all_history(request):
+    PatientAnalysis.objects.all().delete()
+    return Response({"message": "All records deleted successfully"})
